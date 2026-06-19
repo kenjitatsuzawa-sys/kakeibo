@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a1a22">
+<title>💰 家計簿</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0f0f13; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+const STORAGE_KEY = "kakebo_v1";
+
+const CATEGORIES = {
+  expense: [
+    { id: "super",     label: "スーパー", emoji: "🛒" },
+    { id: "conbini",   label: "コンビニ", emoji: "🏪" },
+    { id: "eat_out",   label: "外食",     emoji: "🍜" },
+    { id: "transport", label: "交通",     emoji: "🚃" },
+    { id: "entertain", label: "娯楽",     emoji: "🎮" },
+    { id: "health",    label: "医療",     emoji: "💊" },
+    { id: "fixed",     label: "固定費",   emoji: "🏠" },
+    { id: "invest",    label: "投資",     emoji: "📈" },
+    { id: "loan",      label: "ローン",   emoji: "💳" },
+  ],
+  income: [
+    { id: "salary",  label: "給与",   emoji: "💼" },
+    { id: "bonus",   label: "賞与",   emoji: "🎁" },
+    { id: "other_i", label: "その他", emoji: "💰" },
+  ],
+};
+
+const CAT_COLORS = [
+  "#7c6fcd","#4ecdc4","#ff6b6b","#ffd93d","#6bcb77",
+  "#4d96ff","#ff6bb5","#c77dff","#ff9f43","#54a0ff",
+];
+
+const DAY_NAMES = ["日","月","火","水","木","金","土"];
+
+function fmt(n) { return "¥" + Math.abs(n).toLocaleString(); }
+
+function getCatInfo(id, type) {
+  const list = type ? CATEGORIES[type] : [...CATEGORIES.expense, ...CATEGORIES.income];
+  return list?.find(c => c.id === id) || { label: id, emoji: "📌" };
+}
+
+function todayStr() { return new Date().toISOString().split("T")[0]; }
+
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+function saveData(txs) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(txs)); } catch {}
+}
+
+const S = {
+  app: { background: "#0f0f13", minHeight: "100vh", color: "#e8e8f0", fontFamily: "-apple-system,'Hiragino Sans',sans-serif", maxWidth: 430, margin: "0 auto", fontSize: 15 },
+  header: { background: "#1a1a22", padding: "14px 18px 10px", borderBottom: "1px solid #2e2e3e", position: "sticky", top: 0, zIndex: 100 },
+  headerTop: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  appTitle: { fontSize: 18, fontWeight: 700 },
+  yearLabel: { color: "#7878a0", fontSize: 13 },
+  monthNav: { display: "flex", alignItems: "center", gap: 10, marginTop: 10 },
+  navBtn: { background: "#22222e", border: "1px solid #2e2e3e", color: "#e8e8f0", width: 36, height: 36, borderRadius: 8, cursor: "pointer", fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center" },
+  monthLabel: { flex: 1, textAlign: "center", fontWeight: 600, fontSize: 16 },
+  summary: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "12px 16px" },
+  card: { background: "#1a1a22", borderRadius: 14, padding: "12px 10px", border: "1px solid #2e2e3e" },
+  cardLabel: { fontSize: 10, color: "#7878a0", marginBottom: 4, letterSpacing: "0.05em" },
+  tabs: { display: "flex", padding: "0 16px 12px" },
+  content: { padding: "0 16px 100px" },
+  fab: { position: "fixed", bottom: 28, right: 24, width: 58, height: 58, borderRadius: "50%", background: "#7c6fcd", border: "none", cursor: "pointer", fontSize: 30, color: "#fff", boxShadow: "0 4px 20px rgba(124,111,205,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", zIndex: 300 },
+  modal: { background: "#1a1a22", borderRadius: "20px 20px 0 0", padding: "20px 20px 40px", width: "100%", position: "relative", maxHeight: "90vh", overflowY: "auto" },
+  modalTitle: { fontSize: 17, fontWeight: 700, marginBottom: 16, textAlign: "center" },
+  typeToggle: { display: "flex", gap: 8, marginBottom: 16 },
+  field: { marginBottom: 14 },
+  fieldLabel: { fontSize: 12, color: "#7878a0", display: "block", marginBottom: 6, letterSpacing: "0.05em" },
+  input: { width: "100%", background: "#22222e", border: "1px solid #2e2e3e", borderRadius: 10, padding: "13px 14px", color: "#e8e8f0", fontSize: 16, outline: "none", boxSizing: "border-box", WebkitAppearance: "none" },
+  catGrid: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 },
+  submitBtn: { width: "100%", padding: 16, borderRadius: 12, background: "#7c6fcd", border: "none", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 8 },
+  emptyState: { textAlign: "center", padding: "48px 20px", color: "#7878a0" },
+};
+
+function App() {
+  const now = new Date();
+  const [year, setYear]   = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [tab, setTab]     = useState(0);
+  const [transactions, setTransactions] = useState(() => loadData());
+  const [showModal, setShowModal] = useState(false);
+  const [type, setType]   = useState("expense");
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo]   = useState("");
+  const [cat, setCat]     = useState("");
+  const [date, setDate]   = useState(todayStr());
+
+  const save = useCallback((txs) => {
+    setTransactions(txs);
+    saveData(txs);
+  }, []);
+
+  const changeMonth = (delta) => {
+    let m = month + delta, y = year;
+    if (m > 12) { m = 1; y++; }
+    if (m < 1)  { m = 12; y--; }
+    setMonth(m); setYear(y);
+  };
+
+  const monthTx = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getFullYear() === year && d.getMonth() + 1 === month;
+  });
+
+  const income  = monthTx.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const expense = monthTx.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const balance = income - expense;
+
+  const addTx = () => {
+    const amt = parseInt(amount);
+    if (!amt || amt <= 0) return alert("金額を入力してください");
+    if (!cat)             return alert("カテゴリを選択してください");
+    if (!date)            return alert("日付を入力してください");
+    const tx = { id: Date.now().toString(), type, amount: amt, memo: memo.trim(), cat, date };
+    save([...transactions, tx]);
+    setShowModal(false);
+    setAmount(""); setMemo(""); setCat(""); setDate(todayStr()); setType("expense");
+  };
+
+  const deleteTx = (id) => {
+    if (!confirm("削除しますか？")) return;
+    save(transactions.filter(t => t.id !== id));
+  };
+
+  const openModal = () => {
+    setShowModal(true); setCat(""); setAmount(""); setMemo(""); setDate(todayStr()); setType("expense");
+  };
+
+  // ── Tab 0: 明細 ──
+  const renderList = () => {
+    const sorted = [...monthTx].sort((a,b) => new Date(b.date) - new Date(a.date));
+    if (!sorted.length) return (
+      <div style={S.emptyState}>
+        <div style={{ fontSize: 48 }}>📝</div>
+        <p style={{ marginTop: 12, lineHeight: 1.6 }}>まだ記録がありません<br/>＋ボタンから追加しましょう</p>
+      </div>
+    );
+    const byDate = {};
+    sorted.forEach(t => { if (!byDate[t.date]) byDate[t.date] = []; byDate[t.date].push(t); });
+    return (
+      <div>
+        {Object.keys(byDate).sort((a,b) => new Date(b)-new Date(a)).map(d => {
+          const dd = new Date(d + "T00:00:00");
+          return (
+            <div key={d}>
+              <div style={{ fontSize: 11, color: "#7878a0", padding: "12px 0 6px", letterSpacing: "0.08em" }}>
+                {dd.getMonth()+1}/{dd.getDate()}（{DAY_NAMES[dd.getDay()]}）
+              </div>
+              {byDate[d].map(t => {
+                const ci = getCatInfo(t.cat, t.type);
+                return (
+                  <div key={t.id} style={{ background: "#1a1a22", borderRadius: 10, padding: "12px 14px", marginBottom: 8, display: "flex", alignItems: "center", gap: 12, border: "1px solid #2e2e3e" }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(124,111,205,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{ci.emoji}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.memo || ci.label}</div>
+                      <div style={{ fontSize: 11, color: "#7878a0", marginTop: 2 }}>{ci.label}</div>
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: t.type === "income" ? "#4ecdc4" : "#ff6b6b", flexShrink: 0 }}>
+                      {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
+                    </div>
+                    <button onClick={() => deleteTx(t.id)} style={{ background: "none", border: "none", color: "#ff6b6b", fontSize: 18, cursor: "pointer", opacity: 0.6, flexShrink: 0, padding: "4px 2px" }}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── Tab 1: カテゴリ ──
+  const renderCategory = () => {
+    const expenses = monthTx.filter(t => t.type === "expense");
+    const total = expenses.reduce((s,t) => s + t.amount, 0);
+    if (!expenses.length) return (
+      <div style={S.emptyState}><div style={{ fontSize: 48 }}>📊</div><p style={{ marginTop: 12 }}>支出データがありません</p></div>
+    );
+    const bycat = {};
+    expenses.forEach(t => { bycat[t.cat] = (bycat[t.cat] || 0) + t.amount; });
+    const sorted = Object.entries(bycat).sort((a,b) => b[1]-a[1]);
+    const maxVal = sorted[0][1];
+    return (
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#7878a0", marginBottom: 10, letterSpacing: "0.05em" }}>支出カテゴリ内訳</div>
+        {sorted.map(([catId, val], i) => {
+          const ci = getCatInfo(catId, "expense");
+          const pct = Math.round(val / total * 100);
+          const w   = Math.round(val / maxVal * 100);
+          return (
+            <div key={catId} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: "#7878a0", width: 60, flexShrink: 0, textAlign: "right" }}>{ci.emoji} {ci.label}</div>
+              <div style={{ flex: 1, height: 22, background: "#22222e", borderRadius: 6, overflow: "hidden" }}>
+                <div style={{ width: `${w}%`, height: "100%", background: CAT_COLORS[i % CAT_COLORS.length], borderRadius: 6, display: "flex", alignItems: "center", paddingLeft: 6, fontSize: 10, fontWeight: 700, color: "#fff", minWidth: 2, boxSizing: "border-box" }}>{pct}%</div>
+              </div>
+              <div style={{ fontSize: 11, color: "#7878a0", width: 62, flexShrink: 0, textAlign: "right" }}>{fmt(val)}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── Tab 2: 推移 ──
+  const renderTrend = () => {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      let m = month - i, y = year;
+      if (m <= 0) { m += 12; y--; }
+      months.push({ y, m });
+    }
+    const data = months.map(({ y, m }) => {
+      const txs = transactions.filter(t => { const d = new Date(t.date); return d.getFullYear() === y && d.getMonth()+1 === m; });
+      return { y, m, inc: txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0), exp: txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0) };
+    });
+    const maxVal = Math.max(...data.map(d => Math.max(d.inc, d.exp)), 1);
+    return (
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#7878a0", marginBottom: 8, letterSpacing: "0.05em" }}>月別収支推移</div>
+        <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: "#4ecdc4" }}>■ 収入</span>
+          <span style={{ fontSize: 11, color: "#ff6b6b" }}>■ 支出</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 100, marginBottom: 4 }}>
+          {data.map(d => {
+            const ih = d.inc ? Math.max(Math.round(d.inc/maxVal*90), 4) : 2;
+            const eh = d.exp ? Math.max(Math.round(d.exp/maxVal*90), 4) : 2;
+            const isCur = d.y === year && d.m === month;
+            return (
+              <div key={`${d.y}-${d.m}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, opacity: isCur ? 1 : 0.5 }}>
+                <div style={{ display: "flex", gap: 2, alignItems: "flex-end" }}>
+                  <div style={{ width: 10, height: ih, background: "#4ecdc4", borderRadius: "3px 3px 0 0" }} />
+                  <div style={{ width: 10, height: eh, background: "#ff6b6b", borderRadius: "3px 3px 0 0" }} />
+                </div>
+                <div style={{ fontSize: 9, color: "#7878a0" }}>{d.m}月</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          {data.map(d => {
+            const bal = d.inc - d.exp;
+            const isCur = d.y === year && d.m === month;
+            return (
+              <div key={`${d.y}-${d.m}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid #2e2e3e", opacity: isCur ? 1 : 0.6 }}>
+                <span style={{ fontSize: 12, color: "#7878a0", width: 32 }}>{d.m}月</span>
+                <span style={{ fontSize: 12, color: "#4ecdc4", flex: 1 }}>収入 {fmt(d.inc)}</span>
+                <span style={{ fontSize: 12, color: "#ff6b6b", flex: 1 }}>支出 {fmt(d.exp)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: bal >= 0 ? "#4ecdc4" : "#ff6b6b", width: 72, textAlign: "right" }}>{bal >= 0 ? "+" : ""}{fmt(bal)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const modalCats = CATEGORIES[type];
+
+  return (
+    <div style={S.app}>
+      {/* Header */}
+      <div style={S.header}>
+        <div style={S.headerTop}>
+          <span style={S.appTitle}>💰 家計簿</span>
+          <span style={S.yearLabel}>{year}年</span>
+        </div>
+        <div style={S.monthNav}>
+          <button style={S.navBtn} onClick={() => changeMonth(-1)}>‹</button>
+          <span style={S.monthLabel}>{month}月</span>
+          <button style={S.navBtn} onClick={() => changeMonth(1)}>›</button>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div style={S.summary}>
+        {[["収入", fmt(income), "#4ecdc4"], ["支出", fmt(expense), "#ff6b6b"], ["収支", (balance >= 0 ? "+" : "") + fmt(balance), balance >= 0 ? "#4ecdc4" : "#ff6b6b"]].map(([l,v,c]) => (
+          <div key={l} style={S.card}>
+            <div style={S.cardLabel}>{l}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: c }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div style={S.tabs}>
+        {["明細","カテゴリ","推移"].map((label, i) => (
+          <div key={i} onClick={() => setTab(i)} style={{ flex: 1, padding: 8, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, color: tab === i ? "#7c6fcd" : "#7878a0", borderBottom: `2px solid ${tab === i ? "#7c6fcd" : "transparent"}` }}>{label}</div>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={S.content}>
+        {tab === 0 && renderList()}
+        {tab === 1 && renderCategory()}
+        {tab === 2 && renderTrend()}
+      </div>
+
+      {/* FAB */}
+      <button style={S.fab} onClick={openModal}>＋</button>
+
+      {/* Modal */}
+      {showModal && (
+        <div style={S.overlay} onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
+          <div style={S.modal}>
+            <button onClick={() => setShowModal(false)} style={{ position: "absolute", top: 14, right: 18, background: "none", border: "none", color: "#7878a0", fontSize: 22, cursor: "pointer" }}>✕</button>
+            <div style={S.modalTitle}>取引を追加</div>
+            <div style={S.typeToggle}>
+              {[["expense","支出"],["income","収入"]].map(([t,l]) => (
+                <button key={t} onClick={() => { setType(t); setCat(""); }}
+                  style={{ flex: 1, padding: 10, borderRadius: 10, border: `2px solid ${type===t ? (t==="expense"?"#ff6b6b":"#4ecdc4") : "#2e2e3e"}`, background: type===t ? (t==="expense"?"rgba(255,107,107,0.1)":"rgba(78,205,196,0.1)") : "transparent", color: type===t ? (t==="expense"?"#ff6b6b":"#4ecdc4") : "#7878a0", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{l}</button>
+              ))}
+            </div>
+            <div style={S.field}>
+              <label style={S.fieldLabel}>金額（円）</label>
+              <input type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" style={S.input} />
+            </div>
+            <div style={S.field}>
+              <label style={S.fieldLabel}>メモ</label>
+              <input type="text" value={memo} onChange={e => setMemo(e.target.value)} placeholder="例：西友、松屋" style={S.input} />
+            </div>
+            <div style={S.field}>
+              <label style={S.fieldLabel}>カテゴリ</label>
+              <div style={S.catGrid}>
+                {modalCats.map(c => (
+                  <button key={c.id} onClick={() => setCat(c.id)}
+                    style={{ padding: "10px 4px", borderRadius: 10, border: `1px solid ${cat===c.id?"#7c6fcd":"#2e2e3e"}`, background: cat===c.id?"rgba(124,111,205,0.15)":"#22222e", color: cat===c.id?"#7c6fcd":"#e8e8f0", fontSize: 12, cursor: "pointer", textAlign: "center" }}>
+                    <span style={{ display: "block", fontSize: 20, marginBottom: 3 }}>{c.emoji}</span>{c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={S.field}>
+              <label style={S.fieldLabel}>日付</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} style={S.input} />
+            </div>
+            <button onClick={addTx} style={S.submitBtn}>追加する</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
