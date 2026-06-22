@@ -20,12 +20,12 @@
 </head>
 <body>
 <div id="root"></div>
- 
+
 <script type="text/babel">
 const { useState, useEffect, useCallback } = React;
- 
+
 const STORAGE_KEY = "kakebo_v1";
- 
+
 const CATEGORIES = {
   expense: [
     { id: "super",     label: "スーパー", emoji: "🛒" },
@@ -46,23 +46,23 @@ const CATEGORIES = {
     { id: "other_i", label: "その他", emoji: "💰" },
   ],
 };
- 
+
 const CAT_COLORS = [
   "#7c6fcd","#4ecdc4","#ff6b6b","#ffd93d","#6bcb77",
   "#4d96ff","#ff6bb5","#c77dff","#ff9f43","#54a0ff",
 ];
- 
+
 const DAY_NAMES = ["日","月","火","水","木","金","土"];
- 
+
 function fmt(n) { return "¥" + Math.abs(n).toLocaleString(); }
- 
+
 function getCatInfo(id, type) {
   const list = type ? CATEGORIES[type] : [...CATEGORIES.expense, ...CATEGORIES.income];
   return list?.find(c => c.id === id) || { label: id, emoji: "📌" };
 }
- 
+
 function todayStr() { return new Date().toISOString().split("T")[0]; }
- 
+
 function loadData() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
   catch { return []; }
@@ -70,7 +70,7 @@ function loadData() {
 function saveData(txs) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(txs)); } catch {}
 }
- 
+
 const S = {
   app: { background: "#0f0f13", minHeight: "100vh", color: "#e8e8f0", fontFamily: "-apple-system,'Hiragino Sans',sans-serif", maxWidth: 430, margin: "0 auto", fontSize: 15 },
   header: { background: "#1a1a22", padding: "14px 18px 10px", borderBottom: "1px solid #2e2e3e", position: "sticky", top: 0, zIndex: 100 },
@@ -80,7 +80,7 @@ const S = {
   monthNav: { display: "flex", alignItems: "center", gap: 10, marginTop: 10 },
   navBtn: { background: "#22222e", border: "1px solid #2e2e3e", color: "#e8e8f0", width: 36, height: 36, borderRadius: 8, cursor: "pointer", fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center" },
   monthLabel: { flex: 1, textAlign: "center", fontWeight: 600, fontSize: 16 },
-  summary: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "12px 16px" },
+  summary: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, padding: "10px 16px" },
   card: { background: "#1a1a22", borderRadius: 14, padding: "12px 10px", border: "1px solid #2e2e3e" },
   cardLabel: { fontSize: 10, color: "#7878a0", marginBottom: 4, letterSpacing: "0.05em" },
   tabs: { display: "flex", padding: "0 16px 12px" },
@@ -97,7 +97,7 @@ const S = {
   submitBtn: { width: "100%", padding: 16, borderRadius: 12, background: "#7c6fcd", border: "none", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", marginTop: 8 },
   emptyState: { textAlign: "center", padding: "48px 20px", color: "#7878a0" },
 };
- 
+
 function App() {
   const now = new Date();
   const [year, setYear]   = useState(now.getFullYear());
@@ -111,28 +111,42 @@ function App() {
   const [memo, setMemo]   = useState("");
   const [cat, setCat]     = useState("");
   const [date, setDate]   = useState(todayStr());
- 
+
   const save = useCallback((txs) => {
     setTransactions(txs);
     saveData(txs);
   }, []);
- 
+
   const changeMonth = (delta) => {
     let m = month + delta, y = year;
     if (m > 12) { m = 1; y++; }
     if (m < 1)  { m = 12; y--; }
     setMonth(m); setYear(y);
   };
- 
+
   const monthTx = transactions.filter(t => {
     const d = new Date(t.date);
     return d.getFullYear() === year && d.getMonth() + 1 === month;
   });
- 
+
   const income  = monthTx.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
   const expense = monthTx.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
   const balance = income - expense;
- 
+
+  // 今週（月曜〜日曜）の支出
+  const getWeekExpense = () => {
+    const today = new Date();
+    const dow = today.getDay(); // 0=日,1=月,...,6=土
+    const diffToMon = (dow === 0 ? -6 : 1 - dow);
+    const mon = new Date(today); mon.setDate(today.getDate() + diffToMon); mon.setHours(0,0,0,0);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23,59,59,999);
+    return transactions.filter(t => {
+      const d = new Date(t.date + "T00:00:00");
+      return t.type === "expense" && d >= mon && d <= sun;
+    }).reduce((s,t) => s + t.amount, 0);
+  };
+  const weekExpense = getWeekExpense();
+
   const upsertTx = () => {
     const amt = parseInt(amount);
     if (!amt || amt <= 0) return alert("金額を入力してください");
@@ -148,21 +162,21 @@ function App() {
     setShowModal(false);
     setEditId(null); setAmount(""); setMemo(""); setCat(""); setDate(todayStr()); setType("expense");
   };
- 
+
   const deleteTx = (id) => {
     if (!confirm("削除しますか？")) return;
     save(transactions.filter(t => t.id !== id));
   };
- 
+
   const openModal = () => {
     setEditId(null); setShowModal(true); setCat(""); setAmount(""); setMemo(""); setDate(todayStr()); setType("expense");
   };
- 
+
   const openEditTx = (t) => {
     setEditId(t.id); setType(t.type); setAmount(String(t.amount)); setMemo(t.memo || ""); setCat(t.cat); setDate(t.date);
     setShowModal(true);
   };
- 
+
   // ── Tab 0: 明細 ──
   const renderList = () => {
     const sorted = [...monthTx].sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -205,7 +219,7 @@ function App() {
       </div>
     );
   };
- 
+
   // ── Tab 1: カテゴリ ──
   const renderCategory = () => {
     const expenses = monthTx.filter(t => t.type === "expense");
@@ -237,7 +251,7 @@ function App() {
       </div>
     );
   };
- 
+
   // ── Tab 2: 推移 ──
   const renderTrend = () => {
     const months = [];
@@ -291,9 +305,9 @@ function App() {
       </div>
     );
   };
- 
+
   const modalCats = CATEGORIES[type];
- 
+
   return (
     <div style={S.app}>
       {/* Header */}
@@ -308,34 +322,34 @@ function App() {
           <button style={S.navBtn} onClick={() => changeMonth(1)}>›</button>
         </div>
       </div>
- 
+
       {/* Summary */}
       <div style={S.summary}>
-        {[["収入", fmt(income), "#4ecdc4"], ["支出", fmt(expense), "#ff6b6b"], ["収支", (balance >= 0 ? "+" : "") + fmt(balance), balance >= 0 ? "#4ecdc4" : "#ff6b6b"]].map(([l,v,c]) => (
+        {[["収入", fmt(income), "#4ecdc4"], ["支出", fmt(expense), "#ff6b6b"], ["収支", (balance >= 0 ? "+" : "") + fmt(balance), balance >= 0 ? "#4ecdc4" : "#ff6b6b"], ["週支出", fmt(weekExpense), "#ff9f43"]].map(([l,v,c]) => (
           <div key={l} style={S.card}>
             <div style={S.cardLabel}>{l}</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: c }}>{v}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: c }}>{v}</div>
           </div>
         ))}
       </div>
- 
+
       {/* Tabs */}
       <div style={S.tabs}>
         {["明細","カテゴリ","推移"].map((label, i) => (
           <div key={i} onClick={() => setTab(i)} style={{ flex: 1, padding: 8, textAlign: "center", cursor: "pointer", fontSize: 13, fontWeight: 600, color: tab === i ? "#7c6fcd" : "#7878a0", borderBottom: `2px solid ${tab === i ? "#7c6fcd" : "transparent"}` }}>{label}</div>
         ))}
       </div>
- 
+
       {/* Content */}
       <div style={S.content}>
         {tab === 0 && renderList()}
         {tab === 1 && renderCategory()}
         {tab === 2 && renderTrend()}
       </div>
- 
+
       {/* FAB */}
       <button style={S.fab} onClick={openModal}>＋</button>
- 
+
       {/* Modal */}
       {showModal && (
         <div style={S.overlay} onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
@@ -378,7 +392,7 @@ function App() {
     </div>
   );
 }
- 
+
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
